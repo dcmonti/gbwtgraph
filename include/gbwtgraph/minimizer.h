@@ -729,6 +729,50 @@ public:
     }
   }
 
+  /*
+    Like insert(), but if (key, value.first) is already present in the index and
+    payload_size() > 0, the LAST word of the existing entry's payload is OR'd with
+    the LAST word of the new value's payload. The position and the other payload
+    words (e.g. zipcode) are left unchanged.
+
+    This is the path-aware variant used by index_haplotypes_with_paths(), where
+    multiple kmer-paths can produce the same (key, Position) pair (typically at
+    node boundaries when alternative successor nodes share their first k-1 bp);
+    the haplotype bitmap stored in the last payload word must be the OR of all
+    contributing kmer-paths, not just the first inserter's.
+
+    PRECONDITION: the first payload_size()-1 words of the payload must be a pure
+    function of value.first (the Position) — i.e. all callers that may produce
+    the same (key, Position) pair must compute identical leading payload words.
+    index_haplotypes_with_paths() satisfies this because it derives those words
+    from get_payload(pos_t), which is invoked with the same pos for both inserts.
+    Only the last word (the haplotype bitmap) varies with the kmer-path, and that
+    is what gets merged. Other consumers of this API must respect the precondition.
+
+    For payload_size() == 0 this falls back to insert() (no last word to merge).
+  */
+  void insert_with_last_payload_word_or(key_type key, value_type value)
+  {
+    this->insert_with_last_payload_word_or(key, value, this->hash(key));
+  }
+
+  void insert_with_last_payload_word_or(key_type key, value_type value, size_t hash)
+  {
+    if(key == key_type::no_key() || value.first == Position::no_pos()) { return; }
+    if(this->payload_size() == 0) { this->insert(key, value, hash); return; }
+
+    size_t array_offset = this->find_offset(key, hash);
+    cell_type cell = this->cell(array_offset);
+    if(cell.first == key_type::no_key())
+    {
+      this->insert_new(key, value, cell);
+    }
+    else if(cell.first == key)
+    {
+      this->append_or_merge_last_word(value, cell);
+    }
+  }
+
   // Returns the occurrence count for the kmer.
   size_t count(key_type key) const
   {
@@ -1059,6 +1103,51 @@ private:
     else
     {
       // Now we have two occurrences of this kmer.
+      std::vector<code_type>* occs = new std::vector<code_type>(cell.second, cell.second + this->value_size());
+      this->insert_value(value, *occs);
+      this->write_vector_pointer(occs, cell);
+      cell.first.set_pointer();
+      this->unique--;
+    }
+    this->values++;
+  }
+
+  // Like append(), but if value.first is already in the cell, OR the last word of
+  // the new payload into the existing entry's last word instead of dropping the
+  // new value. Caller must guarantee payload_size() > 0.
+  void append_or_merge_last_word(value_type value, cell_type cell)
+  {
+    // Locate value.first in the cell's sorted occurrence list. We mirror the
+    // binary search in contains() but also compute the array offset of the match.
+    multi_value_type values = this->get_values(const_cell(cell));
+    size_t low = 0, high = values.second;
+    while(low < high)
+    {
+      size_t mid = low + (high - low) / 2;
+      size_t mid_offset = mid * this->value_size();
+      Position candidate(values.first[mid_offset]);
+      if(candidate < value.first) { low = mid + 1; }
+      else if(candidate > value.first) { high = mid; }
+      else
+      {
+        // Found. Cast away const: values.first either points into hash_table[]
+        // (mutable storage) or into a heap-allocated std::vector<code_type>
+        // owned by the cell (also mutable). Other code paths (e.g. clear_value)
+        // mutate the same memory through cell.second / vector pointers.
+        code_type* dst = const_cast<code_type*>(values.first + mid_offset + POS_SIZE);
+        dst[this->payload_size() - 1] |= value.second[this->payload_size() - 1];
+        return;
+      }
+    }
+
+    // Position not in the cell: regular append (mirrors append() body).
+    std::vector<code_type>* ptr = get_vector_pointer(cell);
+    if(ptr != nullptr)
+    {
+      this->insert_value(value, *ptr);
+    }
+    else
+    {
       std::vector<code_type>* occs = new std::vector<code_type>(cell.second, cell.second + this->value_size());
       this->insert_value(value, *occs);
       this->write_vector_pointer(occs, cell);
@@ -1926,6 +2015,19 @@ public:
   void insert(const minimizer_type& minimizer, value_type value)
   {
     this->index.insert(minimizer.key, value, minimizer.hash);
+  }
+
+  /*
+    Path-aware insert: like insert(), but if (minimizer.key, value.first) is
+    already present, the LAST word of the existing payload is OR'd with the LAST
+    word of the new payload, instead of dropping the new value silently.
+
+    See KmerIndex::insert_with_last_payload_word_or() for the precondition on the
+    leading payload words and the rationale.
+  */
+  void insert_with_last_payload_word_or(const minimizer_type& minimizer, value_type value)
+  {
+    this->index.insert_with_last_payload_word_or(minimizer.key, value, minimizer.hash);
   }
 
   /*

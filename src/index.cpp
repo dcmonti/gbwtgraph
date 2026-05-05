@@ -195,13 +195,17 @@ void index_haplotypes_with_paths
       }
     }
 
-    // And now flush the cache.
+    // And now flush the cache. We use insert_with_last_payload_word_or so that
+    // collisions on (key, Position) coming from different kmer-paths (typically
+    // at node boundaries with alternative successors sharing their first k-1 bp)
+    // OR-merge the haplotype bitmap stored in the last payload word, instead of
+    // silently dropping the second inserter's bits.
     #pragma omp critical (minimizer_index)
     {
       for(size_t i = 0, payload_offset = 0; i < current_cache.size(); i++, payload_offset += payload_size)
       {
         value_type value(Position(std::get<1>(current_cache[i])), &payloads[payload_offset]);
-        index.insert(std::get<0>(current_cache[i]), value);
+        index.insert_with_last_payload_word_or(std::get<0>(current_cache[i]), value);
       }
     }
     current_cache.clear();
