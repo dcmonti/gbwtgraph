@@ -195,6 +195,18 @@ TEST_F(GBZSerialization, SwapAndSerialize)
   gbwt::TempFile::remove(filename);
 }
 
+TEST_F(GBZSerialization, LoadTags)
+{
+  std::unique_ptr<GBZ> original = this->create_gbz();
+  std::string filename = gbwt::TempFile::getName("gbz");
+  sdsl::simple_sds::serialize_to(*original, filename);
+
+  gbwt::Tags loaded_tags = GBZ::simple_sds_load_tags(filename);
+  ASSERT_EQ(loaded_tags, original->tags) << "Invalid tags loaded from file";
+
+  gbwt::TempFile::remove(filename);
+}
+
 //------------------------------------------------------------------------------
 
 class GBZFunctionality : public ::testing::Test

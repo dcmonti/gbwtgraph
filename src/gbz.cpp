@@ -375,6 +375,25 @@ GBZ::simple_sds_size() const
   return result;
 }
 
+gbwt::Tags
+GBZ::simple_sds_load_tags(const std::string& filename)
+{
+  std::ifstream in(filename, std::ios_base::binary);
+  if(!in)
+  {
+    throw sdsl::simple_sds::CannotOpenFile(filename, false);
+  }
+  in.exceptions(std::ios::eofbit | std::ios::badbit | std::ios::failbit);
+
+  Header header = sdsl::simple_sds::load_value<Header>(in);
+  header.check();
+  gbwt::Tags tags;
+  tags.simple_sds_load(in);
+
+  in.close();
+  return tags;
+}
+
 void
 GBZ::serialize_to_files(const std::string& gbwt_name, const std::string& graph_name, bool simple_sds_graph) const
 {

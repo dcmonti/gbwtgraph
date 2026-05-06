@@ -200,6 +200,9 @@ public:
   // Returns the size of the serialized structure in elements.
   size_t simple_sds_size() const;
 
+  // Returns the GBZ tags from the given file, without loading it entirely.
+  static gbwt::Tags simple_sds_load_tags(const std::string& filename);
+
   // Serialize the GBWT (Simple-SDS format) and the GBWTGraph to separate files.
   // Default graph format is libhandlegraph / SDSL.
   // NOTE: GBZ tags are not serialized.
